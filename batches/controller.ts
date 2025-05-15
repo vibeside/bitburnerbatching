@@ -34,14 +34,15 @@ export async function main(ns: NS) {
   await populateRamBlocks(ns, "home", new Set())
   while (mainLoop) {
     for (const [k, v] of allServersAndRam) {
-    v.maxRam = ns.getServerMaxRam(k);
-    v.ram = ns.getServerUsedRam(k);
-  }
+      v.maxRam = ns.getServerMaxRam(k);
+      v.ram = ns.getServerUsedRam(k);
+    }
     if (!isPrepped(ns, target)) {
       await prep(ns, target, new Map([...allServersAndRam]))
     }
     await dispatchBatch(ns, target, new Map(allServersAndRam))
-    await ns.sleep(500);
+    await ns.sleep(10)
+    await ns.sleep(ns.getWeakenTime(target));
   }
 }
 async function dispatchBatch(ns: NS, hostname: string, ramBlocks: Map<string, RamBlock>) {
@@ -54,16 +55,22 @@ async function dispatchBatch(ns: NS, hostname: string, ramBlocks: Map<string, Ra
       h: ns.getHackTime(hostname)
     }
 
-    // Greatest time + 5 milliseconds.
-
     ns.scp(SCRIPTS, k)
     // figure out how many batches could theoretically run on this server.
-    let maxBatchCount = Math.floor(v.usableRam / 6.95);
-    if (maxBatchCount <= 0) continue;
-    ns.exec("/batches/Hack.ts", k, maxBatchCount, hostname, timeTos.w - timeTos.h);
-    ns.exec("/batches/Weaken.ts", k, maxBatchCount, hostname, 0);
-    ns.exec("/batches/Grow.ts", k, maxBatchCount, hostname, timeTos.w - timeTos.g);
-    ns.exec("/batches/Weaken.ts", k, maxBatchCount, hostname, 0);
+    const hThreads = Math.floor(0.01 / ns.hackAnalyze(hostname));
+    const wThreads = Math.ceil(ns.hackAnalyzeSecurity(hThreads) / 0.05)
+    const gThreads = Math.ceil(ns.growthAnalyze(hostname, 1 / (1 - hThreads * ns.hackAnalyze(hostname))));
+    const w2Threads = Math.ceil(ns.growthAnalyzeSecurity(gThreads) / 0.05)
+    const predictedRam = (hThreads * 1.7) + ((wThreads + gThreads + w2Threads) * 1.75)
+    while (v.usableRam - predictedRam > 0) {
+    //if(v.usableRam - predictedRam < 0) continue;
+    v.ram += predictedRam;
+      ns.exec("/batches/Hack.ts", k, hThreads, hostname, timeTos.w - timeTos.h);
+      ns.exec("/batches/Weaken.ts", k, wThreads, hostname, 0);
+      ns.exec("/batches/Grow.ts", k, gThreads, hostname, timeTos.w - timeTos.g);
+      ns.exec("/batches/Weaken.ts", k, w2Threads, hostname, 0);
+      await ns.sleep(5);
+    }
 
     // ns.exec("/batches/Hack.ts", k, theoreticalThreads, hostname,minTime)
     // ns.exec("/batches/Weaken.ts", k, theoreticalThreads, hostname,minTime)
@@ -97,17 +104,15 @@ async function populateRamBlocks(ns: NS, hostname: string, visited: Set<string>)
       ns.nuke(hostname);
     }
   }
-  if (allServersAndRam.get(hostname) == undefined) {
+  let existingRamblock = allServersAndRam.get(hostname);
+  if (existingRamblock == undefined) {
     allServersAndRam.set(hostname,
       new RamBlock(
         ns.getServerMaxRam(hostname),
         ns.getServerUsedRam(hostname)
       ))
   } else {
-    let existingRamblock = allServersAndRam.get(hostname) as RamBlock;
-    if(existingRamblock != undefined){
-      existingRamblock.ram = ns.getServerUsedRam(hostname);
-    }
+    existingRamblock.ram = ns.getServerUsedRam(hostname);
   }
   for (const target of scanned) {
     await populateRamBlocks(ns, target, visited);

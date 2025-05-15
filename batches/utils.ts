@@ -18,6 +18,7 @@ export async function prep(ns: NS, hostname: string, ramBlocks: Map<string, all.
   while (!isPrepped(ns, hostname)) {
     let neededGrowThreads = 0;
     let neededWeakenThreads = 0;
+    let neededWeakenTwoThreads = 0;
     let timeTos = {
       w: ns.getWeakenTime(hostname),
       g: ns.getGrowTime(hostname),
@@ -27,10 +28,10 @@ export async function prep(ns: NS, hostname: string, ramBlocks: Map<string, all.
     availMoney = ns.getServerMoneyAvailable(hostname);
 
     if (curSec > minSecurity) {
-      neededWeakenThreads = Math.floor(curSec / 0.05)
+      neededWeakenThreads = Math.ceil(curSec / 0.05)
     }
     if (availMoney < maxMoney) {
-      neededGrowThreads = Math.floor(ns.growthAnalyze(hostname, maxMoney / availMoney));
+      neededGrowThreads = Math.ceil(ns.growthAnalyze(hostname, maxMoney / availMoney));
     }
     for (const [server, block] of ramBlocks) {
 
@@ -38,15 +39,17 @@ export async function prep(ns: NS, hostname: string, ramBlocks: Map<string, all.
       ns.scp(["/batches/Grow.ts", "/batches/Weaken.ts"], server);
       let serverAvailThreads = Math.floor(block.usableRam / 1.75);
       if (serverAvailThreads == 0) continue;
-      if (minSecurity == curSec) {
-        ns.exec("/batches/Grow.ts", server, serverAvailThreads, hostname, timeTos.w - timeTos.g)
-        neededGrowThreads -= serverAvailThreads;
-      } else {
+      if (neededWeakenThreads > 0) {
         ns.exec("/batches/Weaken.ts", server, serverAvailThreads, hostname, 0)
         neededWeakenThreads -= serverAvailThreads;
+      }else if (neededWeakenTwoThreads > 0){
+        ns.exec("/batches/Weaken.ts",server, serverAvailThreads,hostname, 0)
+        neededWeakenTwoThreads -= serverAvailThreads;
+      } else if (neededGrowThreads > 0) {
+        ns.exec("/batches/Grow.ts", server, serverAvailThreads, hostname, timeTos.w - timeTos.g)
+        neededGrowThreads -= serverAvailThreads;
+        neededWeakenTwoThreads += Math.ceil(ns.growthAnalyzeSecurity(serverAvailThreads) / 0.05);
       }
-
-
     }
     await ns.sleep(100);
   }
